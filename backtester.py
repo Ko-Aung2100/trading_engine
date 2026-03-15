@@ -49,7 +49,17 @@ def run_backtest(csv_path="data/spy_2000-2020.csv"):
     
     # 5. Build Chart
     fig = go.Figure()
-    fig.add_trace(go.Scatter(x=df.index, y=df['Close'], name='Price', line=dict(color='gray')))
+    
+    # --- UPDATED: Candlestick trace instead of Scatter ---
+    fig.add_trace(go.Candlestick(
+        x=df.index, 
+        open=df['Open'], 
+        high=df['High'], 
+        low=df['Low'], 
+        close=df['Close'], 
+        name='Price'
+    ))
+    
     fig.add_trace(go.Scatter(x=df.index, y=df['SMA_50'], name='SMA 50', line=dict(color='cyan')))
     fig.add_trace(go.Scatter(x=df.index, y=df['SMA_200'], name='SMA 200', line=dict(color='orange')))
     
@@ -60,5 +70,13 @@ def run_backtest(csv_path="data/spy_2000-2020.csv"):
         sx, sy = zip(*sell_signals)
         fig.add_trace(go.Scatter(x=sx, y=sy, mode='markers', name='Sell', marker=dict(symbol='triangle-down', color='red', size=12)))
         
-    fig.update_layout(template='plotly_dark', margin=dict(l=10, r=10, t=10, b=10), paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
+    # --- UPDATED: Added xaxis_rangeslider_visible=False to match main.py ---
+    fig.update_layout(
+        template='plotly_dark', 
+        margin=dict(l=10, r=10, t=10, b=10), 
+        paper_bgcolor='rgba(0,0,0,0)', 
+        plot_bgcolor='rgba(0,0,0,0)',
+        xaxis_rangeslider_visible=False
+    )
+    
     return fig, win_rate, len(trades)
