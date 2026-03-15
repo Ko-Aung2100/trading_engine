@@ -129,13 +129,27 @@ async def flet_ui(page: ft.Page):
     bt_chart_container = ft.Container(expand=True)
     stats_text = ft.Text("Run a backtest using local CSV data.", size=16, weight="bold")
     
+    # New: Dropdown to control the zoom level
+    zoom_dropdown = ft.Dropdown(
+        options=[
+            ft.dropdown.Option("100", "100 Candles (Zoomed In)"),
+            ft.dropdown.Option("300", "300 Candles"),
+            ft.dropdown.Option("1000", "1000 Candles"),
+            ft.dropdown.Option("0", "All Time (Fully Zoomed Out)")
+        ],
+        value="300", # Default to 300 for a clear candlestick view
+        width=250,
+        label="Chart Zoom Level"
+    )
+    
     async def btn_run_backtest(e):
         stats_text.value = "Running backtest... please wait."
         bt_chart_container.content = ft.ProgressRing()
         await page.update_async()
         
-        # Uses the SPY data you uploaded in your ZIP file
-        fig, win_rate, total_trades = run_backtest(csv_path="data/spy_2000-2020.csv")
+        # Pass the dropdown value into the backtester!
+        lookback = int(zoom_dropdown.value)
+        fig, win_rate, total_trades = run_backtest(csv_path="data/spy_2000-2020.csv", chart_lookback=lookback)
         
         stats_text.value = f"Results: {total_trades} Trades | Win Rate: {win_rate:.2f}%"
         bt_chart_container.content = PlotlyChart(fig, expand=True)
@@ -154,13 +168,13 @@ async def flet_ui(page: ft.Page):
             ])),
             ft.Tab(text="Backtest Analyzer (SPY)", icon=ft.icons.QUERY_STATS, content=ft.Column([
                 ft.Row([
-                    ft.ElevatedButton("Run SPY Backtest", on_click=btn_run_backtest, icon=ft.icons.PLAY_ARROW)
+                    ft.ElevatedButton("Run SPY Backtest", on_click=btn_run_backtest, icon=ft.icons.PLAY_ARROW),
+                    zoom_dropdown  # Add the dropdown to the row!
                 ]),
                 stats_text, ft.Divider(), bt_chart_container
             ]))
         ]
     )
-
     await page.add_async(ft.Row([ft.Icon(ft.icons.SHOW_CHART, size=30, color=ft.colors.BLUE_400), ft.Text("Algorithmic Engine", size=24, weight="bold")]), tabs)
 
 app.mount("/", flet_fastapi.app(flet_ui))
