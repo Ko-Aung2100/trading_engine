@@ -1,4 +1,6 @@
+import os
 import asyncio
+import requests
 import pandas as pd
 import pandas_ta as ta
 import flet as ft
@@ -7,69 +9,73 @@ from fastapi import FastAPI, Request, HTTPException
 from contextlib import asynccontextmanager
 import plotly.graph_objects as go
 from flet.plotly_chart import PlotlyChart
-import ccxt.async_support as ccxt 
 
 from backtester import run_backtest
 from core.state_manager import state
 from strategies.strategy_factory import StrategyFactory
 
-# --- 1. Background Market Scanner (Using Bitbank via CCXT) ---
-# --- 1. Background Market Scanner (Using MEXC via CCXT) ---
+# --- 0. Network Fix: Clear "Ghost" Proxies left by VPNs ---
+for k in ['HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy']:
+    os.environ.pop(k, None)
+
+# --- 1. Background Market Scanner (Direct API Bypass) ---
 async def market_scanner():
-    print("Market Scanner Started: Monitoring BTC/USDT on MEXC...")
-    
-    # MEXC is fully accessible and avoids local ISP DNS blocks
-    exchange = ccxt.mexc() 
+    print("Market Scanner Started: Monitoring BTC/USDT directly via API...")
     last_signal = None 
     
-    try:
-        while True:
-            try:
-                # 1. Fetch live 1-minute data directly from MEXC
-                bars = await exchange.fetch_ohlcv('BTC/USDT', timeframe='1m', limit=60)
-                
-                # 2. Convert to DataFrame
-                df = pd.DataFrame(bars, columns=['timestamp', 'Open', 'High', 'Low', 'Close', 'Volume'])
-                df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
-                df.set_index('timestamp', inplace=True)
-                
-                if not df.empty and len(df) > 21:
-                    # Calculate MAs for the chart and logic
-                    df.ta.sma(length=9, append=True)
-                    df.ta.sma(length=21, append=True)
-                    
-                    # Update the State Manager so the UI can draw the live chart
-                    state.update_live_data(df)
-                    
-                    last_row = df.iloc[-2] # Last closed candle
-                    current_price = last_row['Close']
-                    sma_fast = last_row['SMA_9']
-                    sma_slow = last_row['SMA_21']
+    while True:
+        try:
+            # 1. Fetch data directly in a background thread to prevent Flet UI freezing
+            def fetch_data():
+                # api4.binance.com is the official fallback URL to bypass ISP blocks
+                url = "https://api4.binance.com/api/v3/klines"
+                params = {"symbol": "BTCUSDT", "interval": "1m", "limit": 60}
+                response = requests.get(url, params=params, timeout=10)
+                response.raise_for_status()
+                return response.json()
 
-                    # 3. Check for Crossover
-                    action = None
-                    if sma_fast > sma_slow and last_signal != "BUY":
-                        action = "BUY"
-                    elif sma_fast < sma_slow and last_signal != "SELL":
-                        action = "SELL"
-
-                    # 4. Trigger Execution
-                    if action:
-                        last_signal = action
-                        payload = {"strategy_id": "golden_cross", "action": action, "symbol": "BTC/USDT", "price": current_price}
-                        strategy_instance = StrategyFactory.get_strategy("golden_cross")
-                        await strategy_instance.execute(payload, state)
-
-            except Exception as e:
-                # Added the error type so we can see exactly what fails if it happens again!
-                print(f"Scanner Error: [{type(e).__name__}] {e}")
+            # Execute the request
+            data = await asyncio.to_thread(fetch_data)
             
-            await asyncio.sleep(60) # Wait 1 minute for the next candle
+            # 2. Convert the raw Binance JSON array directly to our DataFrame
+            df = pd.DataFrame(data, columns=['timestamp', 'Open', 'High', 'Low', 'Close', 'Volume', '_', '_', '_', '_', '_', '_'])
+            df = df[['timestamp', 'Open', 'High', 'Low', 'Close', 'Volume']].astype(float)
+            df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
+            df.set_index('timestamp', inplace=True)
             
-    finally:
-        # Safely cleans up the memory session
-        await exchange.close()
+            if not df.empty and len(df) > 21:
+                # Calculate MAs for the chart and logic
+                df.ta.sma(length=9, append=True)
+                df.ta.sma(length=21, append=True)
+                
+                # Update the State Manager so the UI can draw the live chart
+                state.update_live_data(df)
+                
+                last_row = df.iloc[-2] # Last closed candle
+                current_price = last_row['Close']
+                sma_fast = last_row['SMA_9']
+                sma_slow = last_row['SMA_21']
+
+                # 3. Check for Crossover
+                action = None
+                if sma_fast > sma_slow and last_signal != "BUY":
+                    action = "BUY"
+                elif sma_fast < sma_slow and last_signal != "SELL":
+                    action = "SELL"
+
+                # 4. Trigger Execution
+                if action:
+                    last_signal = action
+                    payload = {"strategy_id": "golden_cross", "action": action, "symbol": "BTC/USDT", "price": current_price}
+                    strategy_instance = StrategyFactory.get_strategy("golden_cross")
+                    await strategy_instance.execute(payload, state)
+
+        except Exception as e:
+            # Added error types so we can see exactly what fails if it happens again
+            print(f"Scanner Error: [{type(e).__name__}] {e}")
         
+        await asyncio.sleep(60) # Wait 1 minute for the next candle
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     scanner_task = asyncio.create_task(market_scanner())
@@ -110,7 +116,7 @@ async def flet_ui(page: ft.Page):
         for trade in reversed(state.trade_history):
             color = ft.colors.GREEN_700 if trade["action"] == "BUY" else ft.colors.RED_700
             card = ft.Card(content=ft.Container(padding=10, content=ft.Row([
-                ft.Text(f"{trade['symbol']} {trade['action']} @ ¥{trade.get('price', '')}", color=color, weight="bold"),
+                ft.Text(f"{trade['symbol']} {trade['action']} @ ${trade.get('price', '')}", color=color, weight="bold"),
                 ft.Text(trade['timestamp'], size=12)
             ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN)))
             trade_list.controls.append(card)
@@ -139,7 +145,7 @@ async def flet_ui(page: ft.Page):
     tabs = ft.Tabs(
         selected_index=0, expand=True,
         tabs=[
-            ft.Tab(text="Live Market (BTC/JPY)", icon=ft.icons.BOLT, content=ft.Column([
+            ft.Tab(text="Live Market (BTC/USDT)", icon=ft.icons.BOLT, content=ft.Column([
                 ft.Text("Live Chart (Updates every 60s)", weight="bold", color=ft.colors.BLUE_200),
                 live_chart_container, 
                 ft.Divider(), 
