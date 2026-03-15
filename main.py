@@ -126,20 +126,21 @@ async def flet_ui(page: ft.Page):
     state.register_callback(update_live_ui)
 
     # --- BACKTEST TAB COMPONENTS ---
-    bt_chart_container = ft.Container(expand=True)
+    # Give the chart a fixed height so it stretches out, enabling the page to scroll!
+    bt_chart_container = ft.Container(height=600)
     stats_text = ft.Text("Run a backtest using local CSV data.", size=16, weight="bold")
     
-    # New: Dropdown to control the zoom level
-    zoom_dropdown = ft.Dropdown(
+    # Time-based Dropdown
+    time_dropdown = ft.Dropdown(
         options=[
-            ft.dropdown.Option("100", "100 Candles (Zoomed In)"),
-            ft.dropdown.Option("300", "300 Candles"),
-            ft.dropdown.Option("1000", "1000 Candles"),
-            ft.dropdown.Option("0", "All Time (Fully Zoomed Out)")
+            ft.dropdown.Option("1y", "Last 1 Year"),
+            ft.dropdown.Option("3y", "Last 3 Years"),
+            ft.dropdown.Option("5y", "Last 5 Years"),
+            ft.dropdown.Option("all", "All Time")
         ],
-        value="300", # Default to 300 for a clear candlestick view
-        width=250,
-        label="Chart Zoom Level"
+        value="1y", # Default to 1 Year
+        width=200,
+        label="Time Range"
     )
     
     async def btn_run_backtest(e):
@@ -147,9 +148,9 @@ async def flet_ui(page: ft.Page):
         bt_chart_container.content = ft.ProgressRing()
         await page.update_async()
         
-        # Pass the dropdown value into the backtester!
-        lookback = int(zoom_dropdown.value)
-        fig, win_rate, total_trades = run_backtest(csv_path="data/spy_2000-2020.csv", chart_lookback=lookback)
+        # Pass the time range value into the backtester
+        time_val = time_dropdown.value
+        fig, win_rate, total_trades = run_backtest(csv_path="data/spy_2000-2020.csv", time_range=time_val)
         
         stats_text.value = f"Results: {total_trades} Trades | Win Rate: {win_rate:.2f}%"
         bt_chart_container.content = PlotlyChart(fig, expand=True)
@@ -159,20 +160,30 @@ async def flet_ui(page: ft.Page):
     tabs = ft.Tabs(
         selected_index=0, expand=True,
         tabs=[
-            ft.Tab(text="Live Market (BTC/USDT)", icon=ft.icons.BOLT, content=ft.Column([
-                ft.Text("Live Chart (Updates every 60s)", weight="bold", color=ft.colors.BLUE_200),
-                live_chart_container, 
-                ft.Divider(), 
-                ft.Text("Execution Logs", weight="bold"),
-                trade_list
-            ])),
-            ft.Tab(text="Backtest Analyzer (SPY)", icon=ft.icons.QUERY_STATS, content=ft.Column([
-                ft.Row([
-                    ft.ElevatedButton("Run SPY Backtest", on_click=btn_run_backtest, icon=ft.icons.PLAY_ARROW),
-                    zoom_dropdown  # Add the dropdown to the row!
-                ]),
-                stats_text, ft.Divider(), bt_chart_container
-            ]))
+            ft.Tab(
+                text="Live Market (BTC/USDT)", 
+                icon=ft.icons.BOLT, 
+                content=ft.Column([
+                    ft.Text("Live Chart (Updates every 60s)", weight="bold", color=ft.colors.BLUE_200),
+                    live_chart_container, 
+                    ft.Divider(), 
+                    ft.Text("Execution Logs", weight="bold"),
+                    trade_list
+                ])
+            ),
+            ft.Tab(
+                text="Backtest Analyzer (SPY)", 
+                icon=ft.icons.QUERY_STATS, 
+                content=ft.Column([ # Added scroll mode to this column!
+                    ft.Row([
+                        ft.ElevatedButton("Run SPY Backtest", on_click=btn_run_backtest, icon=ft.icons.PLAY_ARROW),
+                        time_dropdown
+                    ]),
+                    stats_text, 
+                    ft.Divider(), 
+                    bt_chart_container
+                ], scroll=ft.ScrollMode.AUTO)
+            )
         ]
     )
     await page.add_async(ft.Row([ft.Icon(ft.icons.SHOW_CHART, size=30, color=ft.colors.BLUE_400), ft.Text("Algorithmic Engine", size=24, weight="bold")]), tabs)
