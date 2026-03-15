@@ -1,0 +1,11 @@
+fastapi
+uvicorn
+flet
+flet-fastapi
+yfinance
+pandas
+pandas-ta
+websockets
+plotly
+kaleido
+ccxt
